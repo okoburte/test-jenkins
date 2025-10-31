@@ -1,58 +1,62 @@
 pipeline {
-    agent any
+  agent any
 
-        environment {
-            APACHE_DIR = '/var/www/html'
-            REPO_URL = 'https://github.com/okoburte/test-jenkins.git'
-        }
+  environment {
+    APACHE_DIR = '/var/www/html'
+    REPO_URL   = 'https://github.com/okoburte/test-jenkins.git'
+  }
 
-    stages {
-        stage('Dependances') {
-            steps {
-                // Installation des dépendances (apache2)
-                echo 'Installation des dépendances...'
-                sh 'apt-get update'
-                sh 'apt-get install -y apache2'
-            }
-        }
-        stage('Checkout') {
-            steps {
-                // Récupération du code
-                echo 'Récupération du code source...'
-                git "${REPO_URL}"
-            
-            }
-        }
-        stage('Deploy') {
-            steps {
-                // Copie des fichiers vers le serveur web (/var/www/html/)
-                echo 'Déploiement des fichiers...'
-                sh "cp -r * ${APACHE_DIR}"
-            }
-        }
-        stage('Test') {
-            steps {
-                // Vérification du déploiement
-                echo 'Vérification du déploiement...'
-                sh "curl -I http://localhost"
-            }
-        }
+  stages {
+    stage('Dependances') {
+      steps {
+        echo 'Installation des dépendances...'
+        sh '''
+          set -eu
+          sudo apt-get update
+          DEBIAN_FRONTEND=noninteractive sudo apt-get install -y apache2 curl
+        '''
+      }
     }
-    post {
-        success {
-            // Message de succès
-            echo 'Déploiement réussi.'
-        }
-        failure {
-            // Message d'échec
-            echo 'Échec du déploiement.'
-        }
-        always {
-            // Nettoyage
-            // Supprimer les fichiers copiés dans /var/www/html
-            sh "rm -rf ${APACHE_DIR}/*"
-            // Desinstaller apache2
-            sh 'apt-get remove -y apache2'
-        }
+
+    stage('Checkout') {
+      steps {
+        echo 'Récupération du code source...'
+        git "${REPO_URL}"
+      }
     }
+
+    stage('Deploy') {
+      steps {
+        echo 'Déploiement des fichiers...'
+        sh '''
+          set -eu
+          sudo mkdir -p "${APACHE_DIR}"
+          # copie aussi les fichiers cachés (ex: .htaccess)
+          sudo cp -r . "${APACHE_DIR}"
+        '''
+      }
+    }
+
+    stage('Test') {
+      steps {
+        echo 'Vérification du déploiement...'
+        sh 'curl -I http://localhost'
+      }
+    }
+  }
+
+  post {
+    success {
+      echo 'Déploiement réussi.'
+    }
+    failure {
+      echo 'Échec du déploiement.'
+    }
+    always {
+      // Nettoyage (laisse Apache installé pour éviter de casser l’agent)
+      sh 'sudo rm -rf "${APACHE_DIR:?}"/* || true'
+      // Si tu tiens à désinstaller, décommente la ligne suivante :
+      sh 'sudo apt-get remove -y apache2 || true'
+    }
+  }
 }
