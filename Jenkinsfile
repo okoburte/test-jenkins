@@ -1,5 +1,10 @@
 pipeline {
-  agent any
+  agent {
+    docker {
+      image 'debian:bookworm-slim'
+      args  '-u root:root'   // on exécute en root pour apt et /var/www/html
+    }
+  }
 
   environment {
     APACHE_DIR = '/var/www/html'
@@ -12,8 +17,8 @@ pipeline {
         echo 'Installation des dépendances...'
         sh '''
           set -eu
-          sudo apt-get update
-          DEBIAN_FRONTEND=noninteractive sudo apt-get install -y apache2 curl
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends apache2 curl ca-certificates
         '''
       }
     }
@@ -30,9 +35,12 @@ pipeline {
         echo 'Déploiement des fichiers...'
         sh '''
           set -eu
-          sudo mkdir -p "${APACHE_DIR}"
-          # copie aussi les fichiers cachés (ex: .htaccess)
-          sudo cp -r . "${APACHE_DIR}"
+          mkdir -p "${APACHE_DIR}"
+          rm -rf "${APACHE_DIR:?}"/*
+          # copie y compris fichiers cachés (.htaccess, etc.)
+          cp -R . "${APACHE_DIR}"
+          # démarre Apache dans le conteneur (pas de systemd, on utilise apache2ctl)
+          apache2ctl -k start
         '''
       }
     }
@@ -40,7 +48,7 @@ pipeline {
     stage('Test') {
       steps {
         echo 'Vérification du déploiement...'
-        sh 'curl -I http://localhost'
+        sh 'curl -I http://localhost | head -n1'
       }
     }
   }
@@ -53,10 +61,11 @@ pipeline {
       echo 'Échec du déploiement.'
     }
     always {
-      // Nettoyage (laisse Apache installé pour éviter de casser l’agent)
-      sh 'sudo rm -rf "${APACHE_DIR:?}"/* || true'
-      // Si tu tiens à désinstaller, décommente la ligne suivante :
-      sh 'sudo apt-get remove -y apache2 || true'
+      // nettoyage dans le conteneur; on stoppe Apache proprement
+      sh '''
+        set -e
+        apache2ctl -k stop || true
+      '''
     }
   }
 }
